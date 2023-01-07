@@ -39,13 +39,32 @@ struct set
     Node* head;
 };
 
+int capacity = 200;
+struct set *hashTable = NULL;
 
-pe_resource_t*  compareKey(const char* key, struct set *array);
-int getHash(const char *S);
-void push(Node **head, pe_resource_t* data);
-void insert(char* key, pe_resource_t* data, struct set *array);
-void init_array(struct set **array);
-void insert_children(pe_resource_t * rsc, struct set *hashTable);
+pe_resource_t *
+compareKey(const char* key, struct set *array);
+
+int
+getHash(const char *S);
+
+void
+push(Node **head, pe_resource_t* data);
+
+void
+insert(char* key, pe_resource_t* data, struct set *array);
+
+void
+init_array(struct set **array);
+
+void
+free_item(Node *item);
+
+void
+free_table(struct set *array);
+
+void
+insert_children(pe_resource_t * rsc, struct set *hashTable);
 
 static bool
 evaluate_lifetime(xmlNode *lifetime, pe_working_set_t *data_set)
@@ -63,34 +82,34 @@ evaluate_lifetime(xmlNode *lifetime, pe_working_set_t *data_set)
     return result;
 }
 
-int capacity = 100;
-int size = 0;
-struct set *hashTable = NULL;
-
-void push(Node **head, pe_resource_t* data) {
-    Node *tmp = (Node*) malloc(sizeof(Node));
-    //  tmp->value = (pe_resource_t*)malloc(sizeof (pe_resource_t));
+void
+push(Node **head, pe_resource_t* data) {
+    Node *tmp = (Node *) malloc(sizeof(Node));
     tmp->value = data;
     tmp->next = (*head);
     (*head) = tmp;
 }
 
-int getHash(const char *S)
+int
+getHash(const char *S)
 {
     int i = 0;
     int r = 0;
+
     while(*S)
     {
         i++;
         r+=(int)(*S);
         S = S + 3;
     }
+
     return r % capacity;
 }
 
-void init_array(struct set **array)
+void
+init_array(struct set **array)
 {
-    struct set *tmp = (struct set *)malloc(capacity * sizeof(struct set));
+    struct set *tmp = (struct set *) malloc(capacity * sizeof(struct set));
     for (int i = 0; i < capacity; i++)
     {
         tmp[i].key = i;
@@ -99,29 +118,39 @@ void init_array(struct set **array)
     (*array) = tmp;
 }
 
-void insert(char* key, pe_resource_t* data, struct set *array)
+void
+free_item(Node *item) {
+    free(item);
+}
+
+void
+free_table(struct set *array) {
+    for (int i=0; i <capacity; i++) {
+        Node *item = array[i].head;
+        while (item != NULL) {
+            Node *tmp = item->next;
+            free_item(item);
+            item = tmp;
+        }
+
+    }
+    free(array);
+}
+
+void
+insert(char* key, pe_resource_t* data, struct set *array)
 {
     int index = getHash(key);
     if (array[index].head == NULL)
     {
-        Node* head = NULL;
-
-
+        Node *head = NULL;
         array[index].key = index;
-
         push(&head, data);
-        size++;
         array[index].head = head;
-        //  printf("\n Ключ (%s) вставлен \n", key);
     }
-    else if (array[index].key == getHash(key))
+    else if (array[index].key == index)
     {
         push(&array[index].head, data);
-        size++;
-    }
-    else
-    {
-        printf("\n Возникла коллизия \n");
     }
 }
 
@@ -135,15 +164,14 @@ compareKey(const char* key, struct set *array)
     }
     else
     {
-        //   printf("\n Ключ (%s) найден \n", key);
         Node *ptr = array[index].head;
         while (ptr != NULL)
         {
             if (!strcmp(key, ptr->value->id)) {
-                return ptr->value;;
+                return ptr->value;
             }
 
-            ptr = ptr->next; // в ptr адресс следующего элемента списка.
+            ptr = ptr->next;
         }
 
         return NULL;
@@ -152,7 +180,8 @@ compareKey(const char* key, struct set *array)
     return NULL;
 }
 
-void insert_children(pe_resource_t * rsc, struct set *hashTable) {
+void
+insert_children(pe_resource_t * rsc, struct set *hashTable) {
     for (GList *gIter = rsc->children; gIter != NULL; gIter = gIter->next) {
         pe_resource_t *child = (pe_resource_t *) gIter->data;
         insert(child->id, child, hashTable);
@@ -175,7 +204,6 @@ pcmk__unpack_constraints(pe_working_set_t *data_set)
     xmlNode *xml_constraints = pcmk_find_cib_element(data_set->input,
                                                      XML_CIB_TAG_CONSTRAINTS);
 
-
     GList *rIter = NULL;
 
     init_array(&hashTable);
@@ -183,10 +211,6 @@ pcmk__unpack_constraints(pe_working_set_t *data_set)
     for (rIter = data_set->resources; rIter; rIter = rIter->next) {
         pe_resource_t *parent = rIter->data;
         insert(parent->id, parent, hashTable);
-
-        if (size % 1000 == 0) {
-            printf("size = %d\n", size);
-        }
 	insert_children(parent, hashTable);
 
     }
@@ -233,36 +257,21 @@ pcmk__unpack_constraints(pe_working_set_t *data_set)
             pe_err("Unsupported constraint type: %s", tag);
         }
     }
+    free_table(hashTable);
 }
 
 pe_resource_t *
 pcmk__find_constraint_resource(GList *rsc_list, const char *id)
 {
-//   GList *rIter = NULL;
+   pe_resource_t *match = compareKey(id, hashTable);
 
-    pe_resource_t *match2 = compareKey(id, hashTable);
-   //  printf("match2 = %s", match2->id);
-
-    return match2;
-
-  /*  for (rIter = rsc_list; id && rIter; rIter = rIter->next) {
-        pe_resource_t *parent = rIter->data;
-        pe_resource_t *match = parent->fns->find_rsc(parent, id, NULL,
-                                                     pe_find_renamed);
-
-        if (match != NULL) {
-            if(!pcmk__str_eq(match->id, id, pcmk__str_casei)) {
-                 We found an instance of a clone instead 
-                match = uber_parent(match);
-                crm_debug("Found %s for %s", match->id, id);
-            }
-          //  printf("match = %s\n", match->id);
-
-            return match;
-        }
+    if(!pcmk__str_eq(match->id, id, pcmk__str_casei)) {
+    /*  We found an instance of a clone instead */
+        match = uber_parent(match);
+        crm_debug("Found %s for %s", match->id, id);
     }
-    crm_trace("No match for %s", id);
-    return NULL; */
+
+    return match;
 }
 
 /*!
