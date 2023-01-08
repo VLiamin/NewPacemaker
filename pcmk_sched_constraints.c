@@ -132,7 +132,6 @@ free_table(struct set *array) {
             free_item(item);
             item = tmp;
         }
-
     }
     free(array);
 }
